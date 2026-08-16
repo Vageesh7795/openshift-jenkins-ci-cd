@@ -57,7 +57,7 @@ pipeline {
                       .
 
                     echo "Images created:"
-                    podman images | grep "${APP_NAME}"
+                    /usr/bin/podman images | grep "${APP_NAME}"
                 '''
             }
         }
@@ -71,11 +71,11 @@ pipeline {
 
                     echo "Pushing image: ${IMAGE}:${TAG}"
 
-                    podman push "${IMAGE}:${TAG}"
+                    /usr/bin/podman push "${IMAGE}:${TAG}"
 
                     echo "Pushing latest image..."
 
-                    podman push "${IMAGE}:latest"
+                    /usr/bin/podman push "${IMAGE}:latest"
 
                     echo "Image pushed successfully."
                 '''
