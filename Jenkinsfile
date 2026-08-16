@@ -5,8 +5,8 @@ pipeline {
         PROJECT = 'vageeshtk-dev'
         APP_NAME = 'my-application'
 
-        OC_SERVER = 'https://172.30.0.1:443'
-        OC_TOKEN = 'eyJhbGciOiJSUzI1NiIsImtpZCI6IkZYZUc1d1FpY1BJV0lfNlNjRUhRM1hHOHE0NWd0X2cxY1o0TXUwQV9lMWcifQ.eyJhdWQiOlsiaHR0cHM6Ly9vaWRjLm9wMS5vcGVuc2hpZnRhcHBzLmNvbS8yZmVnZnU5bHNnNDdpNzF0a2ozcGJsbjR0c29yZGVjNyJdLCJleHAiOjE3ODY4OTE2MjcsImlhdCI6MTc4Njg4ODAyNywiaXNzIjoiaHR0cHM6Ly9vaWRjLm9wMS5vcGVuc2hpZnRhcHBzLmNvbS8yZmVnZnU5bHNnNDdpNzF0a2ozcGJsbjR0c29yZGVjNyIsImp0aSI6IjhjYWJhMzkwLTcxNTgtNDU5NS05ZGU1LWQ0ZDQzZmI5MWNiYSIsImt1YmVybmV0ZXMuaW8iOnsibmFtZXNwYWNlIjoidmFnZWVzaHRrLWRldiIsInNlcnZpY2VhY2NvdW50Ijp7Im5hbWUiOiJqZW5raW5zLWRlcGxveWVyIiwidWlkIjoiOGJhY2QwOTktODNlZS00ZWJhLWE0NGMtYmM1M2UyOTA0MWY2In19LCJuYmYiOjE3ODY4ODgwMjcsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp2YWdlZXNodGstZGV2OmplbmtpbnMtZGVwbG95ZXIifQ.Q7INE1XYWU3_3B9yU2wm9prv9wihFZxkezygMX14XxqFPveIgyR-EcKEoy-M9KAc8Z64ORRJSCPF2sX-h_dVAC5l-Q4HXx85e4HLKOXEP1iq2DJvXVzqd-HPANhmDdXIKPrPjjBNfebLY6UNtWBD5MedvhP55w9MA9B3n2kQlUdYU3k4EVLGHNu60SJLJl0i1ago3Dq7H27tM1z7OQvAPk9aFwMUtpgAZxWSeeuhr2tl9uqYWFyN4LIggIUf8rxFFuZtwxmf5KVZSC0C5K4EGJ0k4N2DfkzK3vi80xUFRyfiWlP3vzvx6q6uDMev9Ta6Wdm8S6nO9Ym4aDrgakPOAF1oATIj0PkGCp6MYu-F_Bps0dxwUFBXksJI5p9vfvONj1-H34UNUeJTqRHtQ69EDK5-hax8fksfkInEeUEMDMKAWTHBtfmcb796PSul0NFGQP0j2ZAUAc8nbjgZm2JYRywsiiOfKWdBgHtBybne0TvRv9lWVB3yHXgzQidSxtiqieXHMaKeVE0S9Kd06nYNdIO2wG78_oYkxC8YwOP1lqkv-T-I-1qvORDAr5MJPpOCYi6sr1Nd0kUVvq8SMjawQVN-FujN7au6WYkywCJTJZIB_1YhpwI_zXHQjSlLOrtF_ssPLaBWapwk4nhNXspd84LPYYaBFL39CBE1W_j_zJE'
+        OC_SERVER = 'https://api.YOUR-CLUSTER:6443'
+        OC_TOKEN = 'sha256~YOUR_SERVICE_ACCOUNT_TOKEN'
 
         IMAGE = "image-registry.openshift-image-registry.svc:5000/${PROJECT}/${APP_NAME}"
         TAG = "${BUILD_NUMBER}"
@@ -16,7 +16,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                echo 'Checking out source code...'
+                echo 'Checking out application source...'
                 checkout scm
             }
         }
@@ -33,27 +33,50 @@ pipeline {
 
                     oc project "${PROJECT}"
 
-                    echo "Logged in as:"
+                    echo "Logged in user:"
                     oc whoami
 
-                    echo "Project:"
+                    echo "Current project:"
                     oc project
                 '''
             }
         }
 
-        stage('Create/Update BuildConfig') {
+        stage('Create BuildConfig') {
             steps {
                 sh '''
-                    echo "Creating BuildConfig..."
+                    echo "Checking BuildConfig..."
 
-                    oc apply -f k8s/buildconfig.yaml
+                    if oc get buildconfig "${APP_NAME}" >/dev/null 2>&1
+                    then
+                        echo "BuildConfig already exists."
+                    else
+                        echo "Creating BuildConfig..."
 
-                    echo "Starting build..."
+                        oc new-build \
+                          --binary \
+                          --name="${APP_NAME}" \
+                          --strategy=docker
+                    fi
 
-                    oc start-build ${APP_NAME} \
+                    echo "BuildConfig:"
+                    oc get buildconfig "${APP_NAME}"
+                '''
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh '''
+                    echo "Starting OpenShift build..."
+
+                    oc start-build "${APP_NAME}" \
                       --from-dir=. \
                       --follow
+
+                    echo "Build completed."
+
+                    oc get builds
                 '''
             }
         }
@@ -61,14 +84,15 @@ pipeline {
         stage('Tag Image') {
             steps {
                 sh '''
-                    echo "Tagging image..."
+                    echo "Creating build-number image tag..."
 
                     oc tag \
-                      ${APP_NAME}:latest \
-                      ${APP_NAME}:${TAG}
+                      "${APP_NAME}:latest" \
+                      "${APP_NAME}:${TAG}"
 
-                    echo "Images:"
-                    oc get imagestream ${APP_NAME}
+                    echo "ImageStream tags:"
+                    oc get imagestreamtag "${APP_NAME}:latest"
+                    oc get imagestreamtag "${APP_NAME}:${TAG}"
                 '''
             }
         }
@@ -76,7 +100,7 @@ pipeline {
         stage('Deploy') {
             steps {
                 sh '''
-                    echo "Deploying application..."
+                    echo "Applying Kubernetes/OpenShift resources..."
 
                     oc apply -f k8s/deployment.yaml
                     oc apply -f k8s/service.yaml
@@ -84,12 +108,13 @@ pipeline {
 
                     echo "Updating deployment image..."
 
-                    oc set image deployment/${APP_NAME} \
-                      ${APP_NAME}=${IMAGE}:${TAG}
+                    oc set image deployment/"${APP_NAME}" \
+                      "${APP_NAME}"="${IMAGE}:${TAG}"
 
                     echo "Waiting for rollout..."
 
-                    oc rollout status deployment/${APP_NAME}
+                    oc rollout status deployment/"${APP_NAME}" \
+                      --timeout=5m
                 '''
             }
         }
@@ -97,21 +122,35 @@ pipeline {
         stage('Verify') {
             steps {
                 sh '''
-                    echo "========== PODS =========="
+                    echo "======================================"
+                    echo "PODS"
+                    echo "======================================"
+
                     oc get pods -o wide
 
-                    echo "========== DEPLOYMENT =========="
-                    oc get deployment ${APP_NAME}
+                    echo "======================================"
+                    echo "DEPLOYMENT"
+                    echo "======================================"
 
-                    echo "========== SERVICE =========="
-                    oc get svc ${APP_NAME}
+                    oc get deployment "${APP_NAME}"
 
-                    echo "========== ROUTE =========="
-                    oc get route ${APP_NAME}
+                    echo "======================================"
+                    echo "SERVICE"
+                    echo "======================================"
 
-                    echo "========== APPLICATION URL =========="
+                    oc get service "${APP_NAME}"
 
-                    oc get route ${APP_NAME} \
+                    echo "======================================"
+                    echo "ROUTE"
+                    echo "======================================"
+
+                    oc get route "${APP_NAME}"
+
+                    echo "======================================"
+                    echo "APPLICATION URL"
+                    echo "======================================"
+
+                    oc get route "${APP_NAME}" \
                       -o jsonpath='{.spec.host}'
 
                     echo
@@ -122,15 +161,20 @@ pipeline {
 
     post {
         success {
-            echo '======================================'
-            echo ' APPLICATION DEPLOYED SUCCESSFULLY'
-            echo '======================================'
+            echo '''
+========================================
+ APPLICATION DEPLOYED SUCCESSFULLY
+========================================
+'''
         }
 
         failure {
-            echo '======================================'
-            echo ' DEPLOYMENT FAILED'
-            echo '======================================'
+            echo '''
+========================================
+ DEPLOYMENT FAILED
+========================================
+Check the Jenkins console output.
+'''
         }
     }
 }
