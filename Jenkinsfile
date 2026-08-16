@@ -114,7 +114,7 @@ pipeline {
                     echo "Waiting for rollout..."
 
                     oc rollout status deployment/"${APP_NAME}" \
-                      --timeout=5m
+                      --timeout=15m
                 '''
             }
         }
