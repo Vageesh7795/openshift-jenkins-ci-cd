@@ -3,8 +3,9 @@ pipeline {
 
     environment {
         PROJECT = 'cicd-demo'
-        APP_NAME = 'myapp'
-        IMAGE = 'nginx'
+        APP_NAME = 'my-application'
+        REGISTRY = 'image-registry.openshift-image-registry.svc:5000'
+        IMAGE = "${REGISTRY}/${PROJECT}/${APP_NAME}"
         TAG = "${BUILD_NUMBER}"
     }
 
@@ -12,38 +13,92 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git 'https://github.com/Vageesh7795/openshift-jenkins-ci-cd.git'
+                checkout scm
             }
         }
 
-        stage('Build') {
+        stage('Login to OpenShift') {
             steps {
-                echo "Building application..."
+                withCredentials([
+                    string(
+                        credentialsId: 'openshift-token',
+                        variable: 'OC_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        oc login --token=${OC_TOKEN} \
+                          --server=${OC_SERVER} \
+                          --insecure-skip-tls-verify=true
+
+                        oc project ${PROJECT}
+                    '''
+                }
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh '''
+                    podman build \
+                      -t ${IMAGE}:${TAG} \
+                      -t ${IMAGE}:latest \
+                      .
+                '''
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                sh '''
+                    oc registry login
+
+                    podman push \
+                      ${IMAGE}:${TAG}
+
+                    podman push \
+                      ${IMAGE}:latest
+                '''
             }
         }
 
         stage('Deploy') {
             steps {
-                sh """
-                    oc project ${PROJECT}
+                sh '''
+                    oc apply -f k8s/deployment.yaml
+                    oc apply -f k8s/service.yaml
+                    oc apply -f k8s/route.yaml
 
                     oc set image deployment/${APP_NAME} \
-                    ${APP_NAME}=${IMAGE}:${TAG} \
-                    || true
+                      ${APP_NAME}=${IMAGE}:${TAG}
 
                     oc rollout status deployment/${APP_NAME}
-                """
+                '''
             }
         }
 
         stage('Verify') {
             steps {
-                sh """
+                sh '''
+                    echo "Pods:"
                     oc get pods
-                    oc get svc
-                    oc get route
-                """
+
+                    echo "Service:"
+                    oc get svc ${APP_NAME}
+
+                    echo "Route:"
+                    oc get route ${APP_NAME}
+                '''
             }
+        }
+    }
+
+    post {
+        success {
+            echo "Application deployed successfully!"
+        }
+
+        failure {
+            echo "Deployment failed!"
         }
     }
 }
