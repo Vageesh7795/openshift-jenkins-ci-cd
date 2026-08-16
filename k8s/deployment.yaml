@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: my-application
-          image: image-registry.openshift-image-registry.svc:5000/cicd-demo/my-application:latest
+          image: image-registry.openshift-image-registry.svc:5000/vageeshtk-dev/my-application:latest
           ports:
             - containerPort: 80
           resources:
