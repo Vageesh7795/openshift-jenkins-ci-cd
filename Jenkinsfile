@@ -2,17 +2,21 @@ pipeline {
     agent any
 
     environment {
-        PROJECT = 'cicd-demo'
+        PROJECT  = 'vageeshtk-dev'
         APP_NAME = 'my-application'
+
+        OC_SERVER = 'https://172.30.0.1:443'
+
         REGISTRY = 'image-registry.openshift-image-registry.svc:5000'
-        IMAGE = "${REGISTRY}/${PROJECT}/${APP_NAME}"
-        TAG = "${BUILD_NUMBER}"
+        IMAGE    = "${REGISTRY}/${PROJECT}/${APP_NAME}"
+        TAG      = "${BUILD_NUMBER}"
     }
 
     stages {
 
         stage('Checkout') {
             steps {
+                echo 'Checking out application source from GitHub...'
                 checkout scm
             }
         }
@@ -26,11 +30,18 @@ pipeline {
                     )
                 ]) {
                     sh '''
-                        oc login --token=${OC_TOKEN} \
-                          --server=${OC_SERVER} \
+                        oc login \
+                          --server="${OC_SERVER}" \
+                          --token="${OC_TOKEN}" \
                           --insecure-skip-tls-verify=true
 
-                        oc project ${PROJECT}
+                        oc project "${PROJECT}"
+
+                        echo "Logged in user:"
+                        oc whoami
+
+                        echo "Current project:"
+                        oc project
                     '''
                 }
             }
@@ -39,9 +50,11 @@ pipeline {
         stage('Build Image') {
             steps {
                 sh '''
+                    echo "Building Docker image..."
+
                     podman build \
-                      -t ${IMAGE}:${TAG} \
-                      -t ${IMAGE}:latest \
+                      -t "${IMAGE}:${TAG}" \
+                      -t "${IMAGE}:latest" \
                       .
                 '''
             }
@@ -50,13 +63,14 @@ pipeline {
         stage('Push Image') {
             steps {
                 sh '''
+                    echo "Logging into OpenShift registry..."
+
                     oc registry login
 
-                    podman push \
-                      ${IMAGE}:${TAG}
+                    echo "Pushing image..."
 
-                    podman push \
-                      ${IMAGE}:latest
+                    podman push "${IMAGE}:${TAG}"
+                    podman push "${IMAGE}:latest"
                 '''
             }
         }
@@ -64,12 +78,18 @@ pipeline {
         stage('Deploy') {
             steps {
                 sh '''
+                    echo "Deploying application..."
+
                     oc apply -f k8s/deployment.yaml
                     oc apply -f k8s/service.yaml
                     oc apply -f k8s/route.yaml
 
+                    echo "Updating deployment image..."
+
                     oc set image deployment/${APP_NAME} \
                       ${APP_NAME}=${IMAGE}:${TAG}
+
+                    echo "Waiting for rollout..."
 
                     oc rollout status deployment/${APP_NAME}
                 '''
@@ -79,13 +99,13 @@ pipeline {
         stage('Verify') {
             steps {
                 sh '''
-                    echo "Pods:"
-                    oc get pods
+                    echo "===== PODS ====="
+                    oc get pods -o wide
 
-                    echo "Service:"
+                    echo "===== SERVICE ====="
                     oc get svc ${APP_NAME}
 
-                    echo "Route:"
+                    echo "===== ROUTE ====="
                     oc get route ${APP_NAME}
                 '''
             }
@@ -94,11 +114,16 @@ pipeline {
 
     post {
         success {
-            echo "Application deployed successfully!"
+            echo '===================================='
+            echo 'Application deployed successfully!'
+            echo '===================================='
         }
 
         failure {
-            echo "Deployment failed!"
+            echo '===================================='
+            echo 'Deployment failed!'
+            echo 'Check the Jenkins console output.'
+            echo '===================================='
         }
     }
 }
